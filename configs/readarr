@@ -1,0 +1,50 @@
+#!/bin/sh
+
+# PROVIDE: readarr
+# REQUIRE: LOGIN
+# KEYWORD: shutdown
+#
+# Add the following lines to /etc/rc.conf.local or /etc/rc.conf
+# to enable this service. Using sysrc will also work
+#
+# readarr_enable:    Set to YES to enable readarr
+#            Default: NO
+# readarr_user:    The user account used to run the readarr daemon.
+#            This is optional, however do not specifically set this to an
+#            empty string as this will cause the daemon to run as root.
+#            Default: readarr
+# readarr_group:    The group account used to run the readarr daemon.
+#            This is optional, however do not specifically set this to an
+#            empty string as this will cause the daemon to run with group wheel.
+#            Default: radarr
+# readarr_data_dir:    Directory where readarr configuration
+#            data is stored.
+#            Default: "/usr/local/readarr"
+
+. /etc/rc.subr
+name=readarr
+rcvar=${name}_enable
+load_rc_config $name
+
+: ${readarr_enable:="NO"}
+: ${readarr_user:="media"}
+: ${readarr_group:="media"}
+: ${readarr_data_dir:="/mnt/library"}
+
+pidfile="${readarr_data_dir}/${name}_daemon.pid"
+pidfile_child="${readarr_data_dir}/${name}_child.pid"
+command="/usr/sbin/daemon"
+
+start_precmd=${name}_precmd
+readarr_precmd() {
+    if [ ! -d ${readarr_data_dir} ]; then
+    install -d -o ${readarr_user} -g ${readarr_group} ${readarr_data_dir}
+    fi
+
+    chown -R ${readarr_user}:${readarr_group} /usr/local/share/readarr
+
+    rc_flags="-r -f -p ${pidfile_child} -P ${pidfile} /usr/local/share/readarr/Readarr/Readarr --data=${readarr_data_dir} --nobrowser >> /dev/null 2>&1 ${rc_flags}"
+
+}
+
+run_rc_command "$1"
