@@ -1,5 +1,5 @@
 #!/bin/sh
-# Build an iocage jail under TrueNAS 12.3 with  Readarr
+# Build an iocage jail under FreeNAS 11.1 with  Readarr
 # https://github.com/NasKar2/sepapps-freenas-iocage
 
 # Check for root privileges
@@ -81,97 +81,79 @@ fi
 #
 # Create Jail
 echo '{"pkgs":["nano"]}' > /tmp/pkg.json
-if ! iocage create --name "${JAIL_NAME}" -p /tmp/pkg.json -r "${RELEASE}" ip4_addr="${INTERFACE}|${JAIL_IP}/24" defaultrouter="${DEFAULT_GW_IP}" boot="on" host_hostname="${JAIL_NAME}" vnet="${VNET}" ${USE_BASEJAIL} allow_raw_sockets="1" allow_mlock="1" bpf="yes" boot="on"
+if ! iocage create --name "${JAIL_NAME}" -p /tmp/pkg.json -r "${RELEASE}" ip4_addr="${INTERFACE}|${JAIL_IP}/24" defaultrouter="${DEFAULT_GW_IP}" boot="on" allow_mlock="1" allow_raw_sockets="1" host_hostname="${JAIL_NAME}" vnet="${VNET}" ${USE_BASEJAIL} allow_mlock=1 allow_raw_sockets=1
 then
 	echo "Failed to create jail"
 	exit 1
 fi
 rm /tmp/pkg.json
+#
+# Update pkg
+  iocage exec ${JAIL_NAME} "mkdir -p /usr/local/etc/pkg/repos/"
+  iocage exec ${JAIL_NAME} cp /etc/pkg/FreeBSD.conf /usr/local/etc/pkg/repos/FreeBSD.conf
+  iocage exec ${JAIL_NAME} sed -i '' "s/quarterly/latest/" /usr/local/etc/pkg/repos/FreeBSD.conf
+  iocage exec ${JAIL_NAME} pkg update -f
+  iocage exec ${JAIL_NAME} pkg upgrade -yf
 
+iocage exec ${JAIL_NAME} pkg install -y readarr
 #
 # needed for installing from ports
 #mkdir -p ${PORTS_PATH}/ports
 #mkdir -p ${PORTS_PATH}/db
-
 mkdir -p ${POOL_PATH}/${APPS_PATH}/${READARR_DATA}
 mkdir -p ${POOL_PATH}/${MEDIA_LOCATION}/books
 mkdir -p ${POOL_PATH}/${TORRENTS_LOCATION}
-echo "mkdir -p '${POOL_PATH}/${APPS_PATH}/${READARR_DATA}'"
+mkdir -p "${POOL_PATH}/temp/downloads/sabnzbd/complete/books/"
 
-chown -R media:media ${POOL_PATH}/${MEDIA_LOCATION}/books
+echo "mkdir -p '${POOL_PATH}/${APPS_PATH}/${READARR_DATA}'"
+chown -R media:media ${POOL_PATH}/${MEDIA_LOCATION}
 
 readarr_config=${POOL_PATH}/${APPS_PATH}/${READARR_DATA}
-
-iocage exec ${JAIL_NAME} mkdir -p /mnt/configs
-iocage exec ${JAIL_NAME} 'sysrc ifconfig_epair0_name="epair0b"'
 
 # create dir in jail for mount points
 iocage exec ${JAIL_NAME} mkdir -p /usr/ports
 iocage exec ${JAIL_NAME} mkdir -p /var/db/portsnap
 iocage exec ${JAIL_NAME} mkdir -p /config
-iocage exec ${JAIL_NAME} mkdir -p /mnt/library
+iocage exec ${JAIL_NAME} mkdir -p /mnt/media
 iocage exec ${JAIL_NAME} mkdir -p /mnt/configs
 iocage exec ${JAIL_NAME} mkdir -p /mnt/torrents
+iocage exec ${JAIL_NAME} "mkdir -p /temp/downloads/sabnzbd/complete/books/"
 
 #
 # mount ports so they can be accessed in the jail
 #iocage fstab -a ${JAIL_NAME} ${PORTS_PATH}/ports /usr/ports nullfs rw 0 0
 #iocage fstab -a ${JAIL_NAME} ${PORTS_PATH}/db /var/db/portsnap nullfs rw 0 0
-
+iocage fstab -a ${JAIL_NAME} /temp /temp nullfs rw 0 0
 iocage fstab -a ${JAIL_NAME} ${CONFIGS_PATH} /mnt/configs nullfs rw 0 0
 iocage fstab -a ${JAIL_NAME} ${readarr_config} /config nullfs rw 0 0
-iocage fstab -a ${JAIL_NAME} ${POOL_PATH}/${MEDIA_LOCATION}/books /mnt/library nullfs rw 0 0
+iocage fstab -a ${JAIL_NAME} ${POOL_PATH}/${MEDIA_LOCATION} /mnt/media nullfs rw 0 0
 iocage fstab -a ${JAIL_NAME} ${POOL_PATH}/${TORRENTS_LOCATION} /mnt/torrents nullfs rw 0 0
-
-iocage restart ${JAIL_NAME}
-
-# add media user
-iocage exec ${JAIL_NAME} "pw user add media -c media -u 8675309  -d /config -s /usr/bin/nologin"
-  
-# add media group to media user
-#iocage exec ${JAIL_NAME} pw groupadd -n media -g 8675309
-#iocage exec ${JAIL_NAME} pw groupmod media -m media
-#iocage restart ${JAIL_NAME} 
+iocage fstab -a ${JAIL_NAME} ${POOL_PATH}/temp/downloads/sabnzbd/complete/books /temp/downloads/sabnzbd/complete/books nullfs rw 0 0
 
 #
 # Install Readarr
-iocage exec ${JAIL_NAME} "fetch https://github.com/Thefrank/freebsd-port-sooners/releases/download/20210613/radarrv3-3.2.2.5080.txz"
-iocage exec ${JAIL_NAME} "pkg install -y radarrv3-3.2.2.5080.txz"
-iocage exec ${JAIL_NAME} "fetch "https://readarr.servarr.com/v1/update/healthchecks/updatefile?os=bsd&arch=x64&runtime=netcore" -o /readarr.tar.gz"
-iocage exec ${JAIL_NAME} "mkdir /usr/local/share/readarr"
-iocage exec ${JAIL_NAME} "tar -xf /readarr.tar.gz -C /usr/local/share/readarr"
-iocage exec ${JAIL_NAME} "rm /usr/local/etc/rc.d/radarr"
+#iocage exec ${JAIL_NAME} mkdir -p /mnt/torrents/sabnzbd/incomplete
+#iocage exec ${JAIL_NAME} mkdir -p /mnt/torrents/sabnzbd/complete
 
-iocage exec ${JAIL_NAME} chown -R media:media /usr/local/share/readarr /config
-iocage exec ${JAIL_NAME} -- mkdir /usr/local/etc/rc.d
-iocage exec ${JAIL_NAME} cp -f /mnt/configs/readarr /usr/local/etc/rc.d/radarr
-iocage exec ${JAIL_NAME} chmod u+x /usr/local/etc/rc.d/readarr
-#iocage exec ${JAIL_NAME} sed -i '' "s/radarrdata/${RADARR_DATA}/" /usr/local/etc/rc.d/radarr
+#
+# Add user media to jail
+iocage exec ${JAIL_NAME} "pw user add media -c media -u 8675309  -d /nonexistent -s /usr/bin/nologin"
+
+#
+# Change to user media
+iocage exec ${JAIL_NAME} chown -R media:media /config
 iocage exec ${JAIL_NAME} sysrc readarr_enable="YES"
 iocage exec ${JAIL_NAME} sysrc readarr_user="media"
 iocage exec ${JAIL_NAME} sysrc readarr_group="media"
 iocage exec ${JAIL_NAME} sysrc readarr_data_dir="/config"
 iocage exec ${JAIL_NAME} service readarr start
-echo "Radarr installed"
+echo "readarr installed"
 
 #
-# Make pkg upgrade get the latest repo
-#iocage exec ${JAIL_NAME} mkdir -p /usr/local/etc/pkg/repos/
-#iocage exec ${JAIL_NAME} cp -f /mnt/configs/FreeBSD.conf /usr/local/etc/pkg/repos/FreeBSD.conf
-
-#
-# Upgrade to the lastest repo
-#iocage exec ${JAIL_NAME} pkg upgrade -y
-#iocage restart ${JAIL_NAME}
-
-
-#
-# remove /mnt/configs as no longer needed
-#iocage fstab -r ${JAIL_NAME} ${CONFIGS_PATH} /mnt/configs nullfs rw 0 0
-
 # Make media owner of data directories
-#chown -R media:media ${POOL_PATH}/${MEDIA_LOCATION}
-#chown -R media:media ${POOL_PATH}/${TORRENTS_LOCATION}
+chown -R media:media ${POOL_PATH}/${MEDIA_LOCATION}
+chown -R media:media ${POOL_PATH}/${TORRENTS_LOCATION}
 
 echo
 echo "Readarr should be available at http://${JAIL_IP}:8787"
+echo "books will be located at "${POOL_PATH}/${MEDIA_LOCATION}/books
